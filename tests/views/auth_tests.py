@@ -16,42 +16,47 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
-"""
-This file demonstrates writing tests using the unittest module. These will pass
-when you run "manage.py test".
-
-Replace this with more appropriate tests for your application.
-"""
-
 import base64
-from tests.base_test import ArchesTestCase, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, CREATE_TOKEN_SQL, DELETE_TOKEN_SQL
-from django.db import connection
+import hashlib
+import time
+from unittest import mock
+
+from django.http import HttpRequest
 from django.urls import reverse
 from django.contrib.auth import get_user
 from django.contrib.auth.models import User, Group, AnonymousUser
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory
 from django.test.client import Client
-from unittest import mock
+from django.test.utils import override_settings
+from django.utils.http import urlencode
+from oauth2_provider.models import AccessToken, Application
 
 from arches.app.models.models import UserProfile
 from arches.app.models.system_settings import settings
 from arches.app.views.auth import LoginView
 from arches.app.views.concept import RDMView
+from arches.app.utils.external_oauth_backend import ExternalOauthAuthenticationBackend
+from arches.app.utils.arches_crypto import AESCipher
+from arches.app.utils.betterJSONSerializer import JSONSerializer
 from arches.app.utils.middleware import SetAnonymousUser
+from arches.test.utils import sync_overridden_test_settings_to_arches
+from tests.base_test import ArchesTestCase, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET
 
 # these tests can be run from the command line via
-# python manage.py test tests/views/auth_tests.py --pattern="*.py" --settings="tests.test_settings"
+# python manage.py test tests.views.auth_tests --settings="tests.test_settings"
+
 
 class AuthTests(ArchesTestCase):
     @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-
+    def setUpTestData(cls):
+        super().setUpTestData()
         cls.factory = RequestFactory()
         cls.client = Client()
 
-        cls.user = User.objects.create_user("test", "test@archesproject.org", "password")
+        cls.user = User.objects.create_user(
+            "test", "test@archesproject.org", "password"
+        )
 
         rdm_admin_group = Group.objects.get(name="RDM Administrator")
         cls.user.groups.add(rdm_admin_group)
@@ -61,17 +66,14 @@ class AuthTests(ArchesTestCase):
         cls.oauth_client_id = OAUTH_CLIENT_ID
         cls.oauth_client_secret = OAUTH_CLIENT_SECRET
 
-        sql_str = CREATE_TOKEN_SQL.format(token=cls.token, user_id=cls.user.pk)
-        cursor = connection.cursor()
-        cursor.execute(sql_str)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        cursor = connection.cursor()
-        cursor.execute(DELETE_TOKEN_SQL)
-
-        super().tearDownClass()
+        AccessToken.objects.create(
+            token=cls.token,
+            expires="2068-01-01",
+            scope="read write",
+            application_id=44,
+            user_id=cls.user.pk,
+            token_checksum=hashlib.sha256(cls.token.encode("utf-8")).hexdigest(),
+        )
 
     def tearDown(self):
         settings.ENABLE_TWO_FACTOR_AUTHENTICATION = False
@@ -83,7 +85,9 @@ class AuthTests(ArchesTestCase):
 
         """
 
-        request = self.factory.post(reverse("auth"), {"username": "test", "password": "password"})
+        request = self.factory.post(
+            reverse("auth"), {"username": "test", "password": "password"}
+        )
         request.user = self.user
         apply_middleware(request)
         view = LoginView.as_view()
@@ -98,7 +102,10 @@ class AuthTests(ArchesTestCase):
 
         """
 
-        request = self.factory.post(reverse("auth"), {"username": "test@archesproject.org", "password": "password"})
+        request = self.factory.post(
+            reverse("auth"),
+            {"username": "test@archesproject.org", "password": "password"},
+        )
         request.user = self.user
         apply_middleware(request)
         view = LoginView.as_view()
@@ -113,7 +120,9 @@ class AuthTests(ArchesTestCase):
 
         """
 
-        request = self.factory.post(reverse("auth"), {"username": "wrong", "password": "wrong"})
+        request = self.factory.post(
+            reverse("auth"), {"username": "wrong", "password": "wrong"}
+        )
         request.user = self.user
         apply_middleware(request)
         view = LoginView.as_view()
@@ -129,7 +138,9 @@ class AuthTests(ArchesTestCase):
 
         view = LoginView.as_view()
 
-        request = self.factory.post(reverse("auth"), {"username": "test", "password": "password"})
+        request = self.factory.post(
+            reverse("auth"), {"username": "test", "password": "password"}
+        )
         request.user = self.user
         apply_middleware(request)
         response = view(request)
@@ -142,8 +153,13 @@ class AuthTests(ArchesTestCase):
         self.assertTrue(response.status_code == 302)
         self.assertTrue(response.get("location") == reverse("auth"))
 
-    @mock.patch("arches.app.models.models.UserProfile.encrypted_mfa_hash", new_callable=mock.PropertyMock)
-    def test_login_redirect_with_enable_two_factor_authentication_enabled(self, encrypted_mfa_hash):
+    @mock.patch(
+        "arches.app.models.models.UserProfile.encrypted_mfa_hash",
+        new_callable=mock.PropertyMock,
+    )
+    def test_login_redirect_with_enable_two_factor_authentication_enabled(
+        self, encrypted_mfa_hash
+    ):
         """
         Tests that a user can login and is redirected to the two-factor authentication page if they have enabled two-factor authentication
 
@@ -152,7 +168,9 @@ class AuthTests(ArchesTestCase):
 
         encrypted_mfa_hash.return_value = "123456"
 
-        response = self.client.post(reverse("auth"), {"username": "test", "password": "password"})
+        response = self.client.post(
+            reverse("auth"), {"username": "test", "password": "password"}
+        )
         self.assertTemplateUsed(response, "two_factor_authentication_login.htm")
 
     def test_login_redirect_with_force_two_factor_authentication_enabled(self):
@@ -163,7 +181,9 @@ class AuthTests(ArchesTestCase):
         """
         settings.FORCE_TWO_FACTOR_AUTHENTICATION = True
 
-        response = self.client.post(reverse("auth"), {"username": "test", "password": "password"})
+        response = self.client.post(
+            reverse("auth"), {"username": "test", "password": "password"}
+        )
         self.assertTemplateUsed(response, "two_factor_authentication_login.htm")
 
     def test_user_cannot_pass_two_factor_authentication_with_incorrect_2fa_code(self):
@@ -193,8 +213,15 @@ class AuthTests(ArchesTestCase):
         """
         settings.ENABLE_TWO_FACTOR_AUTHENTICATION = True
 
-        with mock.patch("arches.app.models.models.UserProfile.encrypted_mfa_hash", new_callable=mock.PropertyMock, return_value="123456"):
-            with mock.patch("arches.app.utils.arches_crypto.AESCipher.decrypt", return_value="123456"):
+        with mock.patch(
+            "arches.app.models.models.UserProfile.encrypted_mfa_hash",
+            new_callable=mock.PropertyMock,
+            return_value="123456",
+        ):
+            with mock.patch(
+                "arches.app.utils.arches_crypto.AESCipher.decrypt",
+                return_value="123456",
+            ):
                 with mock.patch("pyotp.TOTP.verify", return_value=True):
                     response = self.client.post(
                         reverse("two-factor-authentication-login"),
@@ -221,16 +248,60 @@ class AuthTests(ArchesTestCase):
         user_profile = UserProfile.objects.get(user_id=self.user.pk)
         original_mfa_hash = user_profile.encrypted_mfa_hash
 
-        self.client.post(reverse("two-factor-authentication-settings"), {"user-id": self.user.pk, "generate-qr-code-button": True})
+        link = (
+            AESCipher(settings.SECRET_KEY)
+            .encrypt(
+                JSONSerializer().serialize({"ts": int(time.time()), "user": self.user})
+            )
+            .decode()
+        )
 
-        user_profile = UserProfile.objects.get(user_id=self.user.pk)  # updated UserProfile
+        self.client.post(
+            reverse("two-factor-authentication-settings"),
+            {"link": link, "generate-qr-code-button": True},
+        )
+
+        user_profile = UserProfile.objects.get(
+            user_id=self.user.pk
+        )  # updated UserProfile
         updated_mfa_hash = user_profile.encrypted_mfa_hash
 
         self.assertNotEqual(original_mfa_hash, updated_mfa_hash)
 
+    # TODO: improve this test
+    def test_external_oauth(self):
+        """
+        Test that a user can login via an external oauth provider if the configuration is set in settings.py
+
+        """
+        settings.EXTERNAL_OAUTH_CONFIGURATION = {
+            "client_id": "fake_client_id",
+            "client_secret": "fake_client_secret",
+            "uid_claim": "user",
+            "authorization_endpoint": "https://fakeprovider.org/authorize",
+            "token_endpoint": "https://fakeprovider.org/oauth/token",
+            "user_info_endpoint": "https://fakeprovider.org/userinfo",
+            "scopes": ["openid", "email", "profile", "offline_access"],
+            "validate_id_token": True,
+        }
+        with (
+            self.assertRaises(KeyError),
+            self.assertLogs("arches.app.utils.external_oauth_backend", level="ERROR"),
+        ):
+            ExternalOauthAuthenticationBackend().authenticate(
+                request=HttpRequest(), sso_authentication=True
+            )
+
+        ExternalOauthAuthenticationBackend().authenticate(
+            request=HttpRequest(), sso_authentication=False
+        )  # should not raise
+
     def test_get_oauth_token(self):
         key = "{0}:{1}".format(self.oauth_client_id, self.oauth_client_secret)
-        client = Client(HTTP_AUTHORIZATION="Basic %s" % base64.b64encode(key.encode("UTF-8")).decode("UTF-8"))
+        client = Client(
+            HTTP_AUTHORIZATION="Basic %s"
+            % base64.b64encode(key.encode("UTF-8")).decode("UTF-8")
+        )
 
         # make sure we can POST to the authorize endpoint and get back the proper form
         # response = client.post(reverse('auth'), {'username': 'test', 'password': 'password', 'next': 'oauth2:authorize'})
@@ -252,7 +323,12 @@ class AuthTests(ArchesTestCase):
         # })
 
         response = client.post(
-            reverse("oauth2:token"), {"grant_type": "client_credentials", "scope": "read write", "client_id": self.oauth_client_id}
+            reverse("oauth2:token"),
+            {
+                "grant_type": "client_credentials",
+                "scope": "read write",
+                "client_id": self.oauth_client_id,
+            },
         )
 
         # print response
@@ -269,9 +345,13 @@ class AuthTests(ArchesTestCase):
         response = self.client.get(reverse("rdm", args=[""]))
         self.assertTrue(response.status_code == 302)
         self.assertTrue(response.get("location").split("?")[0] == reverse("auth"))
-        self.assertTrue(response.get("location").split("?")[0] != reverse("rdm", args=[""]))
+        self.assertTrue(
+            response.get("location").split("?")[0] != reverse("rdm", args=[""])
+        )
 
-        response = self.client.get(reverse("rdm", args=[""]), HTTP_AUTHORIZATION="Bearer %s" % self.token)
+        response = self.client.get(
+            reverse("rdm", args=[""]), HTTP_AUTHORIZATION="Bearer %s" % self.token
+        )
         self.assertTrue(response.status_code == 200)
 
     def test_set_anonymous_user_middleware(self):
@@ -304,7 +384,9 @@ class AuthTests(ArchesTestCase):
         self.assertTrue(response.get("location").split("?")[0] == reverse("auth"))
 
         # test get a concept
-        request = self.factory.get(reverse("rdm", kwargs={"conceptid": "00000000-0000-0000-0000-000000000001"}))
+        request = self.factory.get(
+            reverse("rdm", kwargs={"conceptid": "00000000-0000-0000-0000-000000000001"})
+        )
         request.user = AnonymousUser()
         apply_middleware(request)
         view = RDMView.as_view()
@@ -322,8 +404,22 @@ class AuthTests(ArchesTestCase):
             "subconcepts": [
                 {
                     "values": [
-                        {"value": "test label", "language": "en-US", "category": "label", "type": "prefLabel", "id": "", "conceptid": ""},
-                        {"value": "", "language": "en-US", "category": "note", "type": "scopeNote", "id": "", "conceptid": ""},
+                        {
+                            "value": "test label",
+                            "language": "en-US",
+                            "category": "label",
+                            "type": "prefLabel",
+                            "id": "",
+                            "conceptid": "",
+                        },
+                        {
+                            "value": "",
+                            "language": "en-US",
+                            "category": "note",
+                            "type": "scopeNote",
+                            "id": "",
+                            "conceptid": "",
+                        },
                     ],
                     "relationshiptype": "hasTopConcept",
                     "nodetype": "Concept",
@@ -336,7 +432,12 @@ class AuthTests(ArchesTestCase):
             ],
         }
 
-        request = self.factory.post(reverse("rdm", kwargs={"conceptid": "00000000-0000-0000-0000-000000000001"}), concept)
+        request = self.factory.post(
+            reverse(
+                "rdm", kwargs={"conceptid": "00000000-0000-0000-0000-000000000001"}
+            ),
+            concept,
+        )
         request.user = AnonymousUser()
         apply_middleware(request)
         view = RDMView.as_view()
@@ -364,3 +465,99 @@ def set_anonymous_user(request):
 
 def strip_response_location(response):
     return response.get("location").replace("http://testserver", "").split("?")[0]
+
+
+# django-oauth-toolkit's endpoints only accept form-encoded bodies.
+FORM_ENCODED = "application/x-www-form-urlencoded"
+
+
+class DeviceSignInTests(ArchesTestCase):
+    device_client_id = "device-sign-in-test-client"
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.add_users()
+        Application.objects.create(
+            name="Device sign-in test",
+            client_id=cls.device_client_id,
+            client_type=Application.CLIENT_PUBLIC,
+            authorization_grant_type=Application.GRANT_DEVICE_CODE,
+        )
+
+    def test_device_code_page_requires_a_signed_in_user(self):
+        response = self.client.get(reverse("oauth2:device"))
+        self.assertRedirects(
+            response,
+            f"{reverse('auth')}?next={reverse('oauth2:device')}",
+            fetch_redirect_response=False,
+        )
+
+    def test_device_client_id_is_not_found_when_device_sign_in_is_off(self):
+        response = self.client.get(reverse("device_client_id"))
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(OAUTH_DEVICE_CLIENT_ID=device_client_id)
+    def test_device_sign_in_issues_a_token_once_the_user_approves(self):
+        with sync_overridden_test_settings_to_arches():
+            client_id = self.client.get(reverse("device_client_id")).json()["clientid"]
+        device_client = Client()
+        authorization = device_client.post(
+            reverse("oauth2:device-authorization"),
+            urlencode({"client_id": client_id}),
+            content_type=FORM_ENCODED,
+        ).json()
+        self.assertEqual(authorization["verification_uri"], "/o/device/")
+
+        self.client.force_login(User.objects.get(username="ben"))
+        confirm_response = self.client.post(
+            authorization["verification_uri"],
+            {"user_code": authorization["user_code"]},
+        )
+        self.client.post(confirm_response["Location"], {"action": "accept"})
+
+        token_response = device_client.post(
+            reverse("oauth2:token"),
+            urlencode(
+                {
+                    "grant_type": Application.GRANT_DEVICE_CODE,
+                    "device_code": authorization["device_code"],
+                    "client_id": client_id,
+                }
+            ),
+            content_type=FORM_ENCODED,
+        )
+        self.assertEqual(token_response.status_code, 200)
+        access_token = AccessToken.objects.get(
+            token=token_response.json()["access_token"]
+        )
+        self.assertEqual(access_token.user.username, "ben")
+
+    @override_settings(OAUTH_DEVICE_CLIENT_ID=device_client_id)
+    def test_device_token_request_rejects_unknown_and_pending_device_codes(self):
+        device_client = Client()
+        authorization = device_client.post(
+            reverse("oauth2:device-authorization"),
+            urlencode({"client_id": self.device_client_id}),
+            content_type=FORM_ENCODED,
+        ).json()
+        self.assertNotIn("scope", authorization)
+
+        def poll(device_code):
+            return device_client.post(
+                reverse("oauth2:token"),
+                urlencode(
+                    {
+                        "grant_type": Application.GRANT_DEVICE_CODE,
+                        "device_code": device_code,
+                        "client_id": self.device_client_id,
+                    }
+                ),
+                content_type=FORM_ENCODED,
+            )
+
+        pending = poll(authorization["device_code"])
+        self.assertEqual(pending.status_code, 400)
+        self.assertEqual(pending.json()["error"], "authorization_pending")
+        self.assertEqual(poll("not-a-device-code").status_code, 404)
+        self.assertFalse(AccessToken.objects.exists())

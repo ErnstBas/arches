@@ -10,161 +10,218 @@
     </div>
     <div style="padding-bottom: 10px;">
         <select multiple data-bind="
-            placeholder: $root.translations.selectAResourceModel,
-            selectedOptions: selectedResourceModel,
             options: resourceModels,
             optionsText: 'name',
-            chosen: {
-                width: '100%',
-                disabled: isEditable === false
-            },
-            attr: {'aria-label': $root.translations.selectAResourceModel},
+            optionsValue: 'graphid',
+            select2Query: {select2Config: {
+                value: selectedResourceModel,
+                multiple: true,
+                placeholder: $root.translations.selectAResourceModel
+            }},
+            attr: {'data-label': $root.translations.selectAResourceModel},
         "></select>
     </div>
     <div class="rr-table">
         <div data-bind="foreach: config.graphs" style="display: flex; flex-direction: column;">
             <div class='rr-table-row'>
-                <div class="rr-table-row-initial" data-bind="style:{color: $parent.isEditable === true || '#aaa'}">
+                <div class="rr-table-row-initial">
                     <div class='rr-table-column icon-column'>
-                        <button 
+                        <button
                             data-bind="
-                                click: function(){if ($parent.isEditable !== false) {$data.removeRelationship($data)}}, 
-                                clickBubble: false, 
-                                attr: {'disabled': $parent.isEditable === false, 'aria-label': $root.translations.removeRelatedResourceModel($data.name)}, 
-                                style: {color: $parent.isEditable === true || '#aaa'}">
+                                click: function(){$data.removeRelationship($data)},
+                                clickBubble: false,
+                                attr: {'aria-label': $root.translations.removeRelatedResourceModel($data.name)},
+                            "
+                        >
                             <i class="fa fa-trash"></i>
                         </button>
                     </div>
-                    <div class="rr-table-column" tabindex="0" role="button" style="flex-grow: 1; padding-left: 10px;"
-                        data-bind="
-                            click: function() { if($parent.isEditable !== false){self.toggleSelectedResource($data)}; },
-                            clickBubble: false,
-                            onEnterkeyClick, onSpaceClick," 
-                        style="cursor: pointer;">
+                    <div class='rr-table-column icon-column'>
+                        <button
+                            tabindex="0"
+                            data-bind="
+                            click: function() {self.toggleSelectedResource($data)},
+                            attr: {'aria-label': $root.translations.configureRelatedResourceRelationship},
+                            clickBubble: false,"
+                            style="cursor: pointer;">
+                            <i class="fa fa-gear"></i>
+                        </button>
+                    </div>
+                    <div class="rr-table-column" style="flex-grow: 1;">
                         <div class="rr-table-instance-label" data-bind="text: $data.name"></div>
+
                     </div>
                 </div>
                 <div class="rr-table-row-panel" data-bind="if: self.selectedResourceType() === $data, visible: self.selectedResourceType() === $data, css: { 'rr-table-border': self.selectedResourceType() === $data} ">
-                    <div data-bind="if: self.graphIsSemantic">
-                        <div class="rr-table-ontology-selector">
-                            <span data-bind="component: {
-                                name: 'views/components/simple-switch',
-                                params: {
-                                    value: $data.useOntologyRelationship,
-                                    config: {label: $root.translations.useOntology}
-                                }
-                            }"></span>
+                    <div class="rr-relationship-config">
+                        <div class="rr-relationship-field rr-relationship-source">
+                            <label class="rr-relationship-label" data-bind="text: $root.translations.relationshipSource"></label>
+                            <select
+                                class="rr-relationship-select"
+                                data-bind="
+                                    select2Query: {
+                                        select2Config: {
+                                            data: self.relationshipSources,
+                                            value: $data.relationshipSource,
+                                            placeholder: $root.translations.selectARelationshipSource,
+                                        }
+                                    },
+                                    attr: {'data-label': $root.translations.relationshipSource}
+                                "
+                            ></select>
                         </div>
-                    </div>
-                    <div class="row" data-bind="if: $data.useOntologyRelationship">
-                        <div class="row" style="margin-bottom: 10px;">
-                            <label class="col-xs-12" style="font-weight: bold;">
+
+                        <!-- ko if: $data.relationshipSource() === 'ontology' -->
+                        <div class="rr-relationship-field">
+                            <label class="rr-relationship-label">
                                 <span data-bind="text: $root.translations.defaultRelationshipTo"></span>
                                 <span data-bind="text: $data.name"></span>
                             </label>
-
-                            <div class="row" style="padding: 0px 12px; margin-bottom: 10px;">
-                                <span class="col-xs-12" style="font-weight: bold;"
-                                    data-bind="text: self.graphName + ' (' + self.makeFriendly(self.rootOntologyClass) + ')'">
-                                </span>
-
-                                <span class="col-xs-12">
-                                    <select 
-                                        style="width:100%; display:inline-block; margin: 3px 0px;" 
-                                        data-bind="
-                                            select2Query: {
-                                                select2Config: self.getSelect2ConfigForOntologyProperties(
-                                                    $data.ontologyProperty, 
-                                                    self.rootOntologyClass, 
-                                                    $data.ontologyClass, 
-                                                    $root.translations.selectAnOntologyProperty, 
-                                                    true
-                                                )
-                                            }, 
-                                            attr: {'aria-label': $root.translations.defaultRelationshipToResource($data.name)}
-                                        "
-                                    ></select>
-                                </span>
-
-                                <span class="col-xs-12" data-bind="text: $data.name + ' (' + self.makeFriendly($data.ontologyClass) + ')'">
-                                </span>
-                            </div>
+                            <div class="rr-relationship-ontology-class" data-bind="text: self.graphName + ' (' + self.makeFriendly(self.rootOntologyClass) + ')'"></div>
+                            <select
+                                class="rr-relationship-select"
+                                data-bind="
+                                    select2Query: {
+                                        select2Config: self.getSelect2ConfigForOntologyProperties(
+                                            $data.relationship,
+                                            self.rootOntologyClass,
+                                            $data.ontologyClass,
+                                            $root.translations.selectAnOntologyProperty,
+                                            true
+                                        )
+                                    },
+                                    attr: {'aria-label': $root.translations.defaultRelationshipToResource($data.name)}
+                                "
+                            ></select>
+                            <div class="rr-relationship-ontology-class" data-bind="text: $data.name + ' (' + self.makeFriendly($data.ontologyClass) + ')'"></div>
                         </div>
 
-
-                        <div class="row">
-                            <label class="col-xs-12" style="font-weight: bold;">
+                        <div class="rr-relationship-field">
+                            <label class="rr-relationship-label">
                                 <span data-bind="text: $root.translations.defaultInverseRelationshipTo"></span>
                                 <span data-bind="text: $data.name"></span>
                             </label>
-
-                            <div class="row" style="padding: 0px 12px; margin-bottom: 10px;">
-                                <span class="col-xs-12"
-                                    data-bind="text: $data.name + ' (' + self.makeFriendly($data.ontologyClass) + ')'">
-                                </span>
-
-                                <span class="col-xs-12">
-                                    <select style="width:100%; display:inline-block; margin: 3px 0px;" data-bind="
-                                        select2Query: {
-                                            select2Config: self.getSelect2ConfigForOntologyProperties(
-                                                $data.inverseOntologyProperty, 
-                                                $data.ontologyClass, 
-                                                self.rootOntologyClass, 
-                                                $root.translations.selectAnOntologyProperty, 
-                                                true
-                                            )
-                                        },
-                                        attr: {'aria-label': $root.translations.defaultInverseRelationshipToResource($data.name)}
-                                    "></select>
-                                </span>
-
-                                <span class="col-xs-12" data-bind="text: self.graphName + ' (' + self.makeFriendly(self.rootOntologyClass) + ')'"></span>
-                            </div>
+                            <div class="rr-relationship-ontology-class" data-bind="text: $data.name + ' (' + self.makeFriendly($data.ontologyClass) + ')'"></div>
+                            <select
+                                class="rr-relationship-select"
+                                data-bind="
+                                    select2Query: {
+                                        select2Config: self.getSelect2ConfigForOntologyProperties(
+                                            $data.inverseRelationship,
+                                            $data.ontologyClass,
+                                            self.rootOntologyClass,
+                                            $root.translations.selectAnOntologyProperty,
+                                            true
+                                        )
+                                    },
+                                    attr: {'aria-label': $root.translations.defaultInverseRelationshipToResource($data.name)}
+                                "
+                            ></select>
+                            <div class="rr-relationship-ontology-class" data-bind="text: self.graphName + ' (' + self.makeFriendly(self.rootOntologyClass) + ')'"></div>
                         </div>
-                    </div>
+                        <!-- /ko -->
 
-                    <div class="row" data-bind="ifnot: $data.useOntologyRelationship">
-                        <div data-bind='component: {
+                        <!-- ko if: $data.relationshipSource() === 'concept' -->
+                        <div class="rr-relationship-field" data-bind='component: {
                             name: "concept-datatype-config",
                             params: {
                                 config : {rdmCollection: $data.relationshipCollection },
                                 search: false,
                             }
                         }'></div>
-                        <div class="row">
-                            <label class="col-xs-12" style="font-weight: bold;">
-                                <span data-bind="text: $root.translations.relationshipConcept"></span>
-                            </label>
-                            <div class="row">
-                                <div data-bind="component: {
-                                    name: 'concept-select-widget',
-                                    params: {
-                                        node: {'config': {'rdmCollection': $data.relationshipCollection() }},
-                                        value: $data.relationshipConcept,
-                                    }, 
+
+                        <div class="rr-relationship-field">
+                            <label class="rr-relationship-label" data-bind="text: $root.translations.relationship"></label>
+                            <div data-bind="component: {
+                                name: 'concept-select-widget',
+                                params: {
+                                    node: {'config': {'rdmCollection': $data.relationshipCollection() }},
+                                    value: $data.relationship,
                                 },
-                                attr: {'aria-label': $root.translations.relationshipConcept}
-                                "></div>
-                            </div>
+                            },
+                            attr: {'aria-label': $root.translations.relationship}
+                            "></div>
                         </div>
 
-                        <div class="row">
-                            <label class="col-xs-12" style="font-weight: bold;">
-                                <span data-bind="text: $root.translations.inverseRelationshipConcept"></span>
-                            </label>
-                            <div class="row">
-                                <div data-bind="component: {
-                                    name: 'concept-select-widget',
-                                    params: {
-                                        node: {'config': {'rdmCollection': relationshipCollection()}},
-                                        value: $data.inverseRelationshipConcept,
-                                    }
-                                },
-                                attr: {'aria-label': $root.translations.inverseRelationshipConcept}
-                                "></div>
-                            </div>
+                        <div class="rr-relationship-field">
+                            <label class="rr-relationship-label" data-bind="text: $root.translations.inverseRelationship"></label>
+                            <div data-bind="component: {
+                                name: 'concept-select-widget',
+                                params: {
+                                    node: {'config': {'rdmCollection': $data.relationshipCollection()}},
+                                    value: $data.inverseRelationship,
+                                }
+                            },
+                            attr: {'aria-label': $root.translations.inverseRelationship}
+                            "></div>
                         </div>
-                    </div> 
+
+                        <div class="rr-relationship-field">
+                            <span data-bind="text: $root.translations.conceptSourceDeprecation"></span>
+                        </div>
+                        <!-- /ko -->
+
+                        <!-- ko if: $data.relationshipSource() === 'reference' -->
+                        <!-- ko if: self.controlledLists().length -->
+                        <div class="rr-relationship-field">
+                            <label class="rr-relationship-label" data-bind="text: $root.translations.controlledList"></label>
+                            <select
+                                class="rr-relationship-select"
+                                data-bind="
+                                    options: self.controlledLists,
+                                    optionsText: 'name',
+                                    optionsValue: 'id',
+                                    select2Query: {
+                                        select2Config: {
+                                            disable: false,
+                                            value: $data.relationshipControlledList,
+                                            allowClear: true,
+                                            placeholder: $root.translations.selectAControlledList,
+                                        }
+                                    },
+                                    attr: {'data-label': $root.translations.controlledList}
+                                "
+                            ></select>
+                        </div>
+                        <!-- /ko -->
+
+                        <div class="rr-relationship-field">
+                            <label class="rr-relationship-label" data-bind="text: $root.translations.relationship"></label>
+                            <select
+                                class="rr-relationship-select"
+                                data-bind="
+                                    select2Query: {
+                                        select2Config: self.getSelect2ConfigForControlledListItems(
+                                            $data.relationship,
+                                            $data.relationshipControlledList,
+                                            $root.translations.selectAReference,
+                                            true
+                                        )
+                                    },
+                                    attr: {'data-label': $root.translations.relationship}
+                                "
+                            ></select>
+                        </div>
+
+                        <div class="rr-relationship-field">
+                            <label class="rr-relationship-label" data-bind="text: $root.translations.inverseRelationship"></label>
+                            <select
+                                class="rr-relationship-select"
+                                data-bind="
+                                    select2Query: {
+                                        select2Config: self.getSelect2ConfigForControlledListItems(
+                                            $data.inverseRelationship,
+                                            $data.relationshipControlledList,
+                                            $root.translations.selectAReference,
+                                            true
+                                        )
+                                    },
+                                    attr: {'data-label': $root.translations.inverseRelationship}
+                                "
+                            ></select>
+                        </div>
+                        <!-- /ko -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -173,9 +230,9 @@
     <div class="relative">
         <span class="col-xs-12 control-label widget-input-label">
             <span data-bind="text: $root.translations.searchStringText"></span>
-            
-            <i 
-                class="fa fa-eye" 
+
+            <i
+                class="fa fa-eye"
                 style="cursor: pointer;"
                 tabindex="0"
                 data-bind="
@@ -188,10 +245,10 @@
             ></i>
         </span>
     </div>
-    
+
     <div class="col-xs-12" style="padding-bottom: 10px;">
-        <input 
-            type="text" 
+        <input
+            type="text"
             class="form-control"
             data-bind="
                 attr: {placeholder: $root.translations.enterSearchStringHere + '...',
@@ -213,8 +270,9 @@
         select2Query: {
             select2Config:{
                 data: [
-                    { text: $root.translations.references, id: '' },
-                    { text: $root.translations.doesNotReference, id: '!' },
+                    { text: $root.translations.referencesAny, id: 'in_list_any' },
+                    { text: $root.translations.referencesAll, id: 'in_list_all' },
+                    { text: $root.translations.doesNotReference, id: 'in_list_none' },
                     { text: $root.translations.hasNoValue, id: 'null' },
                     { text: $root.translations.hasAnyValue, id: 'not_null' },
                 ],
@@ -224,7 +282,7 @@
 </div>
 <div class="col-md-8 col-lg-9 resource-instance-search" data-bind="visible: op() !== 'null' && op() !== 'not_null'">
     <!-- ko component: {
-        name:  datatype.datatype.includes('list') ? 'resource-instance-multiselect-widget' : 'resource-instance-select-widget',
+        name: 'resource-instance-multiselect-widget',
         params: {
             config: {
                 placeholder: $root.translations.selectAResource,

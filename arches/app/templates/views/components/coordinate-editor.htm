@@ -1,7 +1,7 @@
 {% load i18n %}
 
 <!-- ko if: coordinateEditing() -->
-<div class="card map-coordinate-editor .fixed">
+<div class="card map-coordinate-editor" style="display: flex; flex-direction: column">
     <div class="map-coordinate-editor-header">
         <span data-bind="text: $root.translations.editCoordinates"></span>
     </div>
@@ -13,14 +13,11 @@
             options: coordinateReferences,
             optionsText: 'name',
             optionsValue: 'proj4',
-            value: selectedCoordinateReference,
-            valueAllowUnset: false,
-            chosen: {
-                'width': '210px',
-                'disable_search_threshold': 10,
-                'allow_single_deselect': false
-            },
-            attr: {'aria-label': $root.translations.coordinateReference}
+            select2Query: {select2Config: {
+                value: selectedCoordinateReference,
+                minimumResultsForSearch: 10
+            }},
+            attr: {'data-label': $root.translations.coordinateReference}
         "></select>
     </div>
     <hr/>

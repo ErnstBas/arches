@@ -22,23 +22,64 @@
             </div>
         </div>
 
-        <div class="node-config-item" style="">
+        <div class="node-config-item">
             <div class="control-label">
                 {% trans "Template" %}
             </div>
             <div class="pad-no">
-                <select class="design" data-bind="value: $data.widget_id, options: $data.widgetList && $data.widgetList(), optionsText: 'name', optionsValue: 'id', chosen: {disable_search_threshold: 10, width: '100%'}"></select>
+                <select class="design" data-bind="
+                    attr: {'data-label': {% quoted_trans _('Template') %}},
+                    options: $data.widgetList && $data.widgetList(),
+                    optionsText: 'name',
+                    optionsValue: 'id',
+                    select2Query: {select2Config: {
+                        value: $data.widget_id,
+                        minimumResultsForSearch: 10
+                    }}"></select>
             </div>
         </div>
 
-        <div class="node-config-item" style="">
+        <div class="node-config-item">
             <div class="control-label">
                 {% trans "Visibility" %}
             </div>
             <div class="pad-no">
-                <div data-bind="component: { name: 'views/components/simple-switch', params: {value: visible, config:{label: {% quoted_trans "Make Widget Visible" %}, subtitle: {% quoted_trans "Show this widget by default" %}}}}"></div>
+                <div 
+                    data-bind="component: { 
+                        name: 'views/components/simple-switch',
+                        params: {
+                            value: $data.visible,
+                            config: {
+                                label: {% quoted_trans _("Make Widget Visible") %}, 
+                                subtitle: {% quoted_trans _("Show this widget by default") %}
+                            }
+                        }
+                    }"
+                ></div>
             </div>
         </div>
+
+        <!-- ko if: $data.config.uneditable !== undefined -->
+        <div class="node-config-item">
+            <div class="control-label">
+                {% trans "Disabled" %}
+            </div>
+            <div class="pad-no">
+                <div
+                    data-bind="component: {
+                        name: 'views/components/simple-switch',
+                        params: {
+                            value: $data.config.uneditable,
+                            config: {
+                                label: {% quoted_trans _("Disable Editing") %},
+                                subtitle: {% quoted_trans _("Prevent users from editing value") %}
+                            }
+                        }
+                    }"
+                ></div>
+            </div>
+        </div>
+        <!-- /ko -->
 
         <!-- ko if: ko.unwrap($data.widget_id)  -->
         <div class="widget-config-container" style="margin-top: 5px;" data-bind='component: {
@@ -48,16 +89,17 @@
                 configForm: true,
                 value: ko.observable(null),
                 node: node,
-                card: card
+                card: card,
+                graphDesignerHasDirtyWidget: $parent.hasDirtyWidget
             }
         }'></div>
         <!-- /ko -->
 
 
         <!-- ko if: ko.isObservable($data.card) -->
-        <div class="node-config-item switch-panel" data-bind="css: {'disabled': $data.checkIfImmutable() }">
+        <div class="node-config-item switch-panel">
 
-            <span class="switch switch-small arches-switch" data-bind="css: {'on': $data.node.isrequired(), 'disabled': $data.checkIfImmutable() }, click: $data.toggleRequired"><small></small></span>
+            <span class="switch switch-small arches-switch" data-bind="css: {'on': $data.node.isrequired()}, click: $data.toggleRequired"><small></small></span>
 
             <p class="control-label" style="margin-left: 40px; margin-top: -17px; margin-bottom: 0px;">
                 {% trans "Required" %}

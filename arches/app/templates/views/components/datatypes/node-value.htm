@@ -8,16 +8,14 @@
     </div>
     <div>
         <select data-bind="
-            disable: isEditable === false,
-            placeholder: $root.translations.selectANode,
-            value: config.nodeid,
             options: nodes,
             optionsText: 'name',
             optionsValue: 'id',
-            chosen: {
-                width: '100%'
-            },
-            attr: {'aria-label': $root.translations.relatedNode}
+            select2Query: {select2Config: {
+                value: config.nodeid,
+                placeholder: $root.translations.selectANode
+            }},
+            attr: {'data-label': $root.translations.relatedNode}
         "></select>
     </div>
 </div>
@@ -27,16 +25,15 @@
     </div>
     <div data-bind="if: properties().length > 0">
         <select data-bind="
-            disable: isEditable === false,
-            placeholder: $root.translations.selectAProperty,
             value: config.property,
             options: properties,
             optionsText: 'name',
             optionsValue: 'id',
-            chosen: {
-                width: '100%'
-            },
-            attr: {'aria-label': $root.translations.relationshipToNode}
+            select2Query: {select2Config: {
+                value: config.property,
+                placeholder: $root.translations.selectAProperty
+            }},
+            attr: {'data-label': $root.translations.relationshipToNode}
         "></select>
     </div>
 </div>

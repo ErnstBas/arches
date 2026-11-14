@@ -16,41 +16,61 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
-from arches.settings import *
-import arches
 import os
-import inspect
 
-try:
-    from django.utils.translation import gettext_lazy as _
-except ImportError:  # unable to import prior to installing requirements.txt in setup.py
-    pass
+from arches.settings import *
+
+from django.utils.translation import gettext_lazy as _
 
 PACKAGE_NAME = "arches"
-ROOT_DIR = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-ROOT_DIR = os.path.normpath(os.path.join(ROOT_DIR, "..", "arches"))
-TEST_ROOT = os.path.normpath(os.path.join(ROOT_DIR, "..", "tests"))
 APP_ROOT = ""
+TEST_ROOT = os.path.normpath(os.path.join(ROOT_DIR, "..", "tests"))
+STATICFILES_DIRS = []
 
-MIN_ARCHES_VERSION = arches.__version__
-MAX_ARCHES_VERSION = arches.__version__
-
-# LOAD_V3_DATA_DURING_TESTS = True will engage the most extensive the of the v3
-# data migration tests, which could add over a minute to the test process. It's
-# recommended that this setting only be set to True in tests/settings_local.py
-# and run in specific cases at the discretion of the developer.
-LOAD_V3_DATA_DURING_TESTS = False
-
-RESOURCE_GRAPH_LOCATIONS = (os.path.join(TEST_ROOT, "fixtures", "resource_graphs"),)
+RESOURCE_GRAPH_LOCATIONS = [
+    os.path.join(TEST_ROOT, "fixtures", "resource_graphs"),
+    os.path.join(
+        TEST_ROOT,
+        "fixtures",
+        "testing_prj",
+        "testing_prj",
+        "pkg",
+        "graphs",
+        "resource_models",
+    ),
+    os.path.join(TEST_ROOT, "fixtures", "jsonld_base", "models"),
+]
+REFERENCE_DATA_FIXTURE_LOCATION = os.path.join(
+    TEST_ROOT, "fixtures", "testing_prj", "testing_prj", "pkg", "reference_data"
+)
 
 ONTOLOGY_FIXTURES = os.path.join(TEST_ROOT, "fixtures", "ontologies", "test_ontology")
 ONTOLOGY_PATH = os.path.join(TEST_ROOT, "fixtures", "ontologies", "cidoc_crm")
+MEDIA_ROOT = os.path.join(TEST_ROOT, "fixtures", "data")
 
-BUSISNESS_DATA_FILES = (
+BUSINESS_DATA_FILES = (
     # Put strings here, like "/home/html/django_templates" or "C:/www/django/templates".
     # Always use forward slashes, even on Windows.
     # Don't forget to use absolute paths, not relative paths.
 )
+
+# Class for custom ES document generator and search functionality
+ES_MAPPING_MODIFIER_CLASSES = [
+    "tests.views.search_tests.TestEsMappingModifier",
+    # Contributed by the bundled controlled lists application, exercised by
+    # tests/extensions/controlled_lists/test_reference_es_mapping_modifier.py
+    "arches.extensions.controlled_lists.search.references_es_mapping_modifier.ReferencesEsMappingModifier",
+]
+
+# Reference data index, so that the bundled controlled lists tests can build and
+# query it. REFERENCES_INDEX_NAME comes from arches.settings.
+ELASTICSEARCH_CUSTOM_INDEXES = [
+    {
+        "module": "arches.extensions.controlled_lists.search_indexes.reference_index.ReferenceIndex",
+        "name": REFERENCES_INDEX_NAME,
+        "should_update_asynchronously": True,
+    },
+]
 
 CACHES = {
     "default": {
@@ -60,47 +80,82 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.dummy.DummyCache",
         "LOCATION": "user_permission_cache",
     },
+    # Named by ARCHES_QUERYSETS_* in arches.settings; omitting them raises
+    # arches_querysets.E001. Real backends rather than dummies: the querysets
+    # tests assert query counts that assume these caches actually cache.
+    "querysets_concepts": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "querysets_concepts_cache",
+    },
+    "querysets_resource_instances": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "querysets_resource_instances_cache",
+    },
 }
+
+# Bundled applications are opt-in, so arches.settings does not install them.
+# Arches' own test suite covers them, so it does.
+#
+# Prepending is enough to satisfy both ordering constraints, because
+# arches.settings already orders the entries these have to sit relative to.
+# Django resolves management commands by iterating app configs in reverse, so
+# the earliest entry wins: the bundled applications have to precede "arches"
+# for their command overrides (vue_components ships its own validate and
+# widget, controlled_lists its own packages) to take effect. Templates and
+# static files resolve the other way, so "arches.app" has to stay last, which
+# it already is. The project template reaches the same arrangement by listing
+# "arches" in its trailing block.
+_BUNDLED_APPLICATIONS_WITH_DEPENDENCIES = (
+    # Required by arches.extensions.controlled_lists, whose ListItem uses
+    # ExclusionConstraint.
+    "django.contrib.postgres",
+    "rest_framework",
+    "arches.extensions.querysets",
+    "arches.extensions.vue_components",
+    "arches.extensions.controlled_lists",
+)
+INSTALLED_APPS = _BUNDLED_APPLICATIONS_WITH_DEPENDENCIES + INSTALLED_APPS
+
+LOGGING["loggers"]["django.request"]["level"] = "ERROR"
+LOGGING["loggers"]["arches"]["level"] = "ERROR"
 
 ELASTICSEARCH_PREFIX = "test"
 
-TEST_RUNNER = "tests.base_test.ArchesTestRunner"
+# Fixtures the bundled controlled lists tests load by name.
+FIXTURE_DIRS = [
+    os.path.join(TEST_ROOT, "extensions", "controlled_lists", "fixtures", "data"),
+]
+
+ROOT_URLCONF = "tests.urls"
+# django_hosts overrides ROOT_URLCONF per request, so the host map has to
+# point at the same urlconf or requests bypass the bundled applications.
+ROOT_HOSTCONF = "tests.hosts"
+
+TEST_RUNNER = "arches.test.runner.ArchesTestRunner"
+SILENCED_SYSTEM_CHECKS.append(
+    "arches.W001"
+)  # Cache backend does not support rate-limiting
+
+FILE_TYPE_CHECKING = "lenient"
 
 # could add Chrome, PhantomJS etc... here
 LOCAL_BROWSERS = []  # ['Firefox']
 
-# these are set in Travis CI
-SAUCE_USERNAME = os.environ.get("SAUCE_USERNAME")
-SAUCE_ACCESS_KEY = os.environ.get("SAUCE_ACCESS_KEY")
-
 ENABLE_USER_SIGNUP = True
 FORCE_USER_SIGNUP_EMAIL_AUTHENTICATION = True
 
-RUN_LOCAL = True
-if SAUCE_USERNAME and SAUCE_ACCESS_KEY:
-    RUN_LOCAL = False
-
-# browser/os combinations to use with saucelabs
-REMOTE_BROWSERS = [
-    # {"platform": "Windows 8.1",
-    #  "browserName": "internet explorer",
-    #  "version": "11"},
-    # {"platform": "Mac OS X 10.9",
-    #  "browserName": "chrome",
-    #  "version": "53"},
-    # {"platform": "Linux",
-    #  "browserName": "firefox",
-    #  "version": "45"}
+# https://docs.djangoproject.com/en/stable/topics/testing/overview/#password-hashing
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.MD5PasswordHasher",
 ]
-
-
-OVERRIDE_RESOURCE_MODEL_LOCK = True
 
 ENABLE_TWO_FACTOR_AUTHENTICATION = False
 FORCE_TWO_FACTOR_AUTHENTICATION = False
 
 DATATYPE_LOCATIONS.append("tests.fixtures.datatypes")
-ELASTICSEARCH_HOSTS = [{"scheme": "http", "host": "localhost", "port": ELASTICSEARCH_HTTP_PORT}]
+ELASTICSEARCH_HOSTS = [
+    {"scheme": "http", "host": "localhost", "port": ELASTICSEARCH_HTTP_PORT}
+]
 LANGUAGES = [
     ("de", _("German")),
     ("en", _("English")),
@@ -109,15 +164,17 @@ LANGUAGES = [
     ("ar", _("Arabic")),
 ]
 
-DOCKER = False
+PERMISSION_DEFAULTS = {}
+
+CELERY_CHECK_ONLY_INSPECT_BROKER = True
+
 
 try:
     from arches.settings_local import *
 except ImportError:
     pass
 
-if DOCKER:
-    try:
-        from arches.settings_docker import *
-    except ImportError:
-        pass
+
+# Tests shouldn't depend on celery running, so overwrite after settings_local import
+# This is enough to fool check_if_celery_available()
+CELERY_BROKER_URL = ""

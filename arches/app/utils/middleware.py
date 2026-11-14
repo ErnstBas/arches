@@ -1,5 +1,5 @@
 import time
-from django.urls import reverse
+from django.urls import Resolver404, resolve
 from django.http import HttpResponse
 from django.contrib.auth.models import User, AnonymousUser
 from django.utils.deprecation import MiddlewareMixin
@@ -12,14 +12,36 @@ from arches.app.utils.betterJSONSerializer import JSONSerializer, JSONDeserializ
 HTTP_HEADER_ENCODING = "iso-8859-1"
 
 
+# Pages where a person approves an OAuth client. They must send visitors who
+# aren't signed in to the login page, not approve the client as "anonymous".
+OAUTH_APPROVAL_URL_NAMES = {
+    "authorize",
+    "device",
+    "device-confirm",
+    "device-grant-status",
+}
+
+
+def is_oauth_approval_page(request):
+    try:
+        resolved_url = resolve(request.path_info)
+    except Resolver404:
+        return False
+    return (
+        resolved_url.namespace == "oauth2"
+        and resolved_url.url_name in OAUTH_APPROVAL_URL_NAMES
+    )
+
+
 class SetAnonymousUser(MiddlewareMixin):
     def process_request(self, request):
-        # for OAuth authentication to work, we can't automatically assign
-        # the anonymous user to the request, otherwise the anonymous user is
-        # used for all OAuth resourse requests
-        if request.path != reverse("oauth2:authorize") and request.user.is_anonymous:
+        if request.user.is_anonymous and not is_oauth_approval_page(request):
             try:
-                request.user = User.objects.get(username="anonymous")
+                request.user = (
+                    User.objects.filter(username="anonymous")
+                    .select_related("userprofile")
+                    .get()
+                )
             except Exception:
                 pass
 
@@ -30,7 +52,9 @@ class ModifyAuthorizationHeader(MiddlewareMixin):
         # HTTP_AUTHORIZATION header. So, if the request has the alternate
         # HTTP_X_AUTHORIZATION header, update the request to use the standard
         if request.META.get("HTTP_X_AUTHORIZATION", None) is not None:
-            request.META["HTTP_AUTHORIZATION"] = request.META.get("HTTP_X_AUTHORIZATION")
+            request.META["HTTP_AUTHORIZATION"] = request.META.get(
+                "HTTP_X_AUTHORIZATION"
+            )
             del request.META["HTTP_X_AUTHORIZATION"]
 
 
@@ -56,7 +80,3 @@ class TokenMiddleware(MiddlewareMixin):
     def process_request(self, request):
         token = self.get_authorization_header(request)
         request.token = token
-
-
-class AuthenticationFailed(Exception):
-    pass

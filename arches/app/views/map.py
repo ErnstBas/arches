@@ -15,12 +15,14 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
+
+from django.contrib.gis.db.models import Extent
+from django.contrib.gis.db.models.functions import Transform
 from django.db import transaction
 from django.shortcuts import render
 from django.http import Http404
 from django.utils.translation import gettext as _
 from django.utils.decorators import method_decorator
-from guardian.shortcuts import get_users_with_perms, get_groups_with_perms
 from revproxy.views import ProxyView
 from arches.app.models import models
 from arches.app.models.system_settings import settings
@@ -30,16 +32,15 @@ from arches.app.datatypes.datatypes import DataTypeFactory
 from arches.app.utils.betterJSONSerializer import JSONSerializer, JSONDeserializer
 from arches.app.utils.decorators import group_required
 from arches.app.utils.response import JSONResponse
-from arches.app.utils.permission_backend import get_users_for_object, get_groups_for_object
-from arches.app.search.search_engine_factory import SearchEngineFactory
-from arches.app.search.elasticsearch_dsl_builder import Query, Bool, GeoBoundsAgg, Term
-from arches.app.search.mappings import RESOURCES_INDEX
+from arches.app.utils.permission_backend import (
+    get_users_with_permission_for_object,
+    get_groups_with_permission_for_object,
+)
 
 
 @method_decorator(group_required("Application Administrator"), name="dispatch")
 class MapLayerManagerView(MapBaseManagerView):
     def get(self, request):
-        se = SearchEngineFactory().create()
         datatype_factory = DataTypeFactory()
         datatypes = models.DDataType.objects.all()
         widgets = models.Widget.objects.all()
@@ -55,14 +56,17 @@ class MapLayerManagerView(MapBaseManagerView):
         )
 
         def get_resource_bounds(node):
-            query = Query(se, start=0, limit=0)
-            search_query = Bool()
-            query.add_query(search_query)
-            query.add_aggregation(GeoBoundsAgg(field="points.point", name="bounds"))
-            query.add_query(Term(field="graph_id", term=str(node.graph.graphid)))
-            results = query.search(index=RESOURCES_INDEX)
-            bounds = results["aggregations"]["bounds"]["bounds"] if "bounds" in results["aggregations"]["bounds"] else None
-            return bounds
+            # Same shape as an Elasticsearch geo_bounds aggregation, which the front end expects.
+            extent = models.GeoJSONGeometry.objects.filter(node=node).aggregate(
+                extent=Extent(Transform("geom", 4326))
+            )["extent"]
+            if extent is None:
+                return None
+            west, south, east, north = extent
+            return {
+                "top_left": {"lat": north, "lon": west},
+                "bottom_right": {"lat": south, "lon": east},
+            }
 
         context["geom_nodes_json"] = JSONSerializer().serialize(context["geom_nodes"])
         resource_layers = []
@@ -72,7 +76,9 @@ class MapLayerManagerView(MapBaseManagerView):
             datatype = datatype_factory.get_instance(node.datatype)
             map_layer = datatype.get_map_layer(node=node, preview=True)
             if map_layer is not None:
-                count = models.TileModel.objects.filter(nodegroup_id=node.nodegroup_id, data__has_key=str(node.nodeid)).count()
+                count = models.TileModel.objects.filter(
+                    nodegroup_id=node.nodegroup_id, data__has_key=str(node.nodeid)
+                ).count()
                 if count > 0:
                     map_layer["bounds"] = get_resource_bounds(node)
                 else:
@@ -82,16 +88,37 @@ class MapLayerManagerView(MapBaseManagerView):
             if map_source is not None:
                 resource_sources.append(map_source)
             permissions[str(node.pk)] = {
-                "users": sorted([user.email or user.username for user in get_users_for_object("read_nodegroup", node.nodegroup)]),
-                "groups": sorted([group.name for group in get_groups_for_object("read_nodegroup", node.nodegroup)]),
+                "users": sorted(
+                    [
+                        user.email or user.username
+                        for user in get_users_with_permission_for_object(
+                            "read_nodegroup", node.nodegroup
+                        )
+                    ]
+                ),
+                "groups": sorted(
+                    [
+                        group.name
+                        for group in get_groups_with_permission_for_object(
+                            "read_nodegroup", node.nodegroup
+                        )
+                    ]
+                ),
             }
-        context["resource_map_layers_json"] = JSONSerializer().serialize(resource_layers)
-        context["resource_map_sources_json"] = JSONSerializer().serialize(resource_sources)
+        context["resource_map_layers_json"] = JSONSerializer().serialize(
+            resource_layers
+        )
+        context["resource_map_sources_json"] = JSONSerializer().serialize(
+            resource_sources
+        )
         context["node_permissions"] = JSONSerializer().serialize(permissions)
 
         context["nav"]["title"] = _("Map Layer Manager")
         context["nav"]["icon"] = "fa-server"
-        context["nav"]["help"] = {"title": _("Map Layer Manager"), "templates": ["map-manager-help"]}
+        context["nav"]["help"] = {
+            "title": _("Map Layer Manager"),
+            "templates": ["map-manager-help"],
+        }
 
         return render(request, "views/map-layer-manager.htm", context)
 
@@ -113,7 +140,9 @@ class MapLayerManagerView(MapBaseManagerView):
         with transaction.atomic():
             map_layer.save()
             if not map_layer.isoverlay and map_layer.addtomap:
-                models.MapLayer.objects.filter(isoverlay=False).exclude(pk=map_layer.pk).update(addtomap=False)
+                models.MapLayer.objects.filter(isoverlay=False).exclude(
+                    pk=map_layer.pk
+                ).update(addtomap=False)
         return JSONResponse({"success": True, "map_layer": map_layer})
 
     def delete(self, request, maplayerid):

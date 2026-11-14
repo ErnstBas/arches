@@ -1,15 +1,66 @@
+import os
+import tomllib
+from importlib.metadata import PackageNotFoundError, requires
+from pathlib import Path
+
+from django.apps import AppConfig, apps
 from django.conf import settings
-from django.core.checks import register, Tags, Error, Warning
+from django.core.checks import register, CheckMessage, Error, Tags, Warning
+from django.core.checks.messages import ERROR, WARNING
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import Version
+
+from arches import __version__
+from arches.app.utils.frontend_configuration_utils.generate_frontend_configuration import (
+    generate_frontend_configuration,
+)
+
+
+class ArchesAppConfig(AppConfig):
+    name = "arches"
+    verbose_name = "Arches"
+    is_arches_application = False
+    # Set on Arches applications that ship inside the arches distribution rather
+    # than as separately released packages. See check_arches_compatibility().
+    bundled_with_arches = False
+
+    def ready(self):
+        import arches.app.signals
+        from arches.app.models.fields.i18n import register_i18n_adapters
+
+        register_i18n_adapters()
+
+        # Imported here: django-oauth-toolkit's models need the app registry.
+        from arches.app.utils.oauth_device_grant import patch_device_grant_expiry
+
+        patch_device_grant_expiry()
+
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "arches.settings")
+        generate_frontend_configuration()
+
+
+if settings.FILE_TYPE_CHECKING not in (None, "lenient", "strict"):
+    raise ValueError("FILE_TYPE_CHECKING must be one of: None, 'lenient', 'strict'.")
+
+
+### SYSTEM CHECKS ###
+supported_by_django_ratelimit = (
+    "django.core.cache.backends.memcached.PyLibMCCache",
+    "django.core.cache.backends.memcached.PyMemcacheCache",
+    "django.core.cache.backends.redis.RedisCache",
+)
 
 
 @register(Tags.security)
 def check_cache_backend_for_production(app_configs, **kwargs):
     errors = []
     your_cache = settings.CACHES["default"]["BACKEND"]
-    if not settings.DEBUG and your_cache == "django.core.cache.backends.dummy.DummyCache":
+    if not settings.DEBUG and your_cache not in supported_by_django_ratelimit:
         errors.append(
             Error(
-                "Using dummy cache in production",
+                "Cache backend does not support rate-limiting",
+                hint=f"Your cache: {your_cache}\n\tSupported caches: {supported_by_django_ratelimit}",
+                obj=settings.APP_NAME,
                 id="arches.E001",
             )
         )
@@ -19,18 +70,169 @@ def check_cache_backend_for_production(app_configs, **kwargs):
 @register(Tags.security)
 def check_cache_backend(app_configs, **kwargs):
     errors = []
-    supported_by_django_ratelimit = (
-        "django.core.cache.backends.memcached.PyLibMCCache",
-        "django.core.cache.backends.memcached.PyMemcacheCache",
-        "django.core.cache.backends.redis.RedisCache",
-    )
     your_cache = settings.CACHES["default"]["BACKEND"]
     if your_cache not in supported_by_django_ratelimit:
         errors.append(
             Warning(
                 "Cache backend does not support rate-limiting",
                 hint=f"Your cache: {your_cache}\n\tSupported caches: {supported_by_django_ratelimit}",
+                obj=settings.APP_NAME,
                 id="arches.W001",
+            )
+        )
+    return errors
+
+
+@register(Tags.compatibility)
+def check_elasticsearch_disabled_permission_framework(app_configs, **kwargs):
+    """
+    The default allow permission framework resolves per-user restrictions against
+    the Elasticsearch resource index and has no database equivalent, so it cannot
+    be used with Elasticsearch disabled.
+    """
+    errors = []
+    if settings.ELASTICSEARCH_ENABLED:
+        return errors
+    if "arches_default_allow" in settings.PERMISSION_FRAMEWORK:
+        errors.append(
+            Error(
+                "PERMISSION_FRAMEWORK is incompatible with ELASTICSEARCH_ENABLED = False",
+                hint=(
+                    "The default allow framework requires Elasticsearch. Use "
+                    "'arches_default_deny.ArchesDefaultDenyPermissionFramework', or set "
+                    "ELASTICSEARCH_ENABLED = True."
+                ),
+                obj=settings.APP_NAME,
+                id="arches.E004",
+            )
+        )
+    return errors
+
+
+@register(Tags.compatibility)
+def check_arches_compatibility(app_configs, **kwargs):
+    def read_project_requirements_from_toml_file(config: AppConfig):
+        with open(Path(config.path).parent / "pyproject.toml", "rb") as f:
+            data = tomllib.load(f)
+        try:
+            project_requirements = data["project"]["dependencies"]
+        except KeyError:  # pragma: no cover
+            raise ValueError from None
+        return project_requirements
+
+    arches_version = Version(__version__)
+
+    if app_configs is None:
+        app_configs = apps.get_app_configs()
+
+    errors = []
+    for config in app_configs:
+        if not getattr(config, "is_arches_application", False):
+            continue
+        if getattr(config, "bundled_with_arches", False):
+            # Bundled applications ship inside the arches distribution, so they have
+            # no pyproject.toml or distribution metadata of their own to declare an
+            # arches requirement in. Their compatibility is guaranteed by construction.
+            continue
+        project_requirements = ["No project requirements found."]
+
+        try:
+            project_requirements = requires(config.name)
+            if project_requirements is None:
+                raise PackageNotFoundError
+        except PackageNotFoundError:
+            # Not installed by pip: read pyproject.toml directly
+            project_requirements = read_project_requirements_from_toml_file(config)
+
+        for requirement in project_requirements:
+            to_parse = requirement.lower()
+            # Normalize "arches" [requires() output] to "arches " [raw toml file]
+            # So we can split on a consistent separator (space)
+            to_parse = to_parse.replace("arches", "arches ")
+            if to_parse.split()[0] == "arches":
+                to_parse = requirement.lower().replace("arches", "").lstrip()
+            else:
+                continue
+            try:
+                parsed_arches_requirement = SpecifierSet(to_parse)
+            except InvalidSpecifier:
+                # might have been arches-for-x==3 -> for-x==3, not valid; keep searching.
+                continue
+            break
+        else:
+            errors.append(
+                CheckMessage(
+                    level=WARNING if settings.DEBUG else ERROR,
+                    msg="Arches requirement is invalid, missing, or given by a URL.",
+                    obj=config.name,
+                    hint=project_requirements,
+                    id="arches.E002",
+                )
+            )
+            continue
+
+        if arches_version not in parsed_arches_requirement:
+            errors.append(
+                CheckMessage(
+                    level=WARNING if settings.DEBUG else ERROR,
+                    msg=f"Incompatible arches requirement for Arches version: {arches_version}",
+                    obj=config.name,
+                    hint=requirement,
+                    id="arches.E003",
+                )
+            )
+
+    return errors
+
+
+@register(Tags.compatibility)
+def warn_old_compatibility_settings(app_configs, **kwargs):
+    errors = []
+
+    if getattr(settings, "MIN_ARCHES_VERSION", None) or getattr(
+        settings, "MAX_ARCHES_VERSION", None
+    ):
+        errors.append(
+            Warning(
+                msg=f"MIN_ARCHES_VERSION and MAX_ARCHES_VERSION have no effect.",
+                hint="Migrate your version range to pyproject.toml.",
+                obj=settings.APP_NAME,
+                id="arches.W002",
+            )
+        )
+    return errors
+
+
+@register(Tags.compatibility)
+def warn_default_allow_permission_framework(app_configs, **kwargs):
+    errors = []
+
+    if (
+        getattr(settings, "PERMISSION_FRAMEWORK", None)
+        == "arches_default_allow.ArchesDefaultAllowPermissionFramework"
+    ):
+        errors.append(
+            Warning(
+                msg="Default Allow is deprecated and no longer supported. Please migrate to Default Deny",
+                hint="Set PERMISSION_FRAMEWORK to arches_default_deny.ArchesDefaultDenyPermissionFramework.",
+                obj=settings.APP_NAME,
+                id="arches.W003",
+            )
+        )
+    return errors
+
+
+@register(Tags.compatibility)
+def warn_mapbox_api_key_deprecated(app_configs, **kwargs):
+    errors = []
+
+    if getattr(settings, "MAPBOX_API_KEY", None):
+        errors.append(
+            Warning(
+                msg="MAPBOX_API_KEY is deprecated and no longer used by Arches.",
+                hint="Remove MAPBOX_API_KEY from your settings. It will be removed in a future release.",
+                obj=settings.APP_NAME,
+                id="arches.W004",
             )
         )
     return errors

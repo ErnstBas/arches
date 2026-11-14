@@ -19,8 +19,6 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 import os
 from tempfile import NamedTemporaryFile
 
-from django.utils.translation import gettext as _
-
 
 class ThumbnailGenerator(object):
 
@@ -29,19 +27,19 @@ class ThumbnailGenerator(object):
         Args:
             inputfile_path: a path to a file on disk to create a thumbnail from
             outputfile_path: a path to a file on disk where the thumbnail will be written to
-        
-        Returns: 
+
+        Returns:
             None
         """
 
-        raise NotImplementedError # subclasses should implement this method
+        raise NotImplementedError  # subclasses should implement this method
 
     def get_thumbnail_data(self, uploadedfile):
         """
         Args:
-            uploadedfile: a Django File object 
-        
-        Returns: 
+            uploadedfile: a Django File object
+
+        Returns:
             binary representation of that file as a thumbnail
         """
 
@@ -49,11 +47,11 @@ class ThumbnailGenerator(object):
 
         with NamedTemporaryFile(suffix=".png") as thumbnail:
             try:
-                # uploaded files that are large enough get written to a TemporaryUploadedFile 
+                # uploaded files that are large enough get written to a TemporaryUploadedFile
                 # and have a temporary_file_path
                 self.make_thumbnail(uploadedfile.temporary_file_path(), thumbnail.name)
             except AttributeError as e:
-                # small files are uploaded to an InMemoryUploadedFile 
+                # small files are uploaded to an InMemoryUploadedFile
                 # and don't have a temporary_file_path hence the except clause
                 # because there's not file written to disk when initially uploaded, we need to make one
                 uploadedfile_extension = f".{uploadedfile.name.split('.')[-1]}"
@@ -63,7 +61,6 @@ class ThumbnailGenerator(object):
                     tempfile.seek(0)
                     self.make_thumbnail(tempfile.name, thumbnail.name)
 
-            
             # for some reason thumbnails of video files can still end up being very large
             # this tries to take care of that by making a thumbnail of the "large" thumbnail
             if os.stat(thumbnail.name).st_size > 500000:
@@ -74,14 +71,3 @@ class ThumbnailGenerator(object):
                 binary_data = thumbnail.read()
 
         return binary_data
-
-
-class ThumbnailGenerationError(Exception):
-    def __init__(self, message=_("Unable to generate a thumbnail from the supplied file."), code=None):
-        self.title = _("Thumbnail Generation Error")
-        self.message = message
-        self.code = code
-        super().__init__(self.message)
-
-    def __str__(self):
-        return repr(self.message)

@@ -1,39 +1,77 @@
-define([], function() {
-    return function loadComponentDependencies(componentPaths){
-        for (const componentPath of componentPaths) {
-            try {  // first try to load project path
-                // eslint-disable-next-line no-undef
-                require(`${APP_ROOT_DIRECTORY}/media/js/${componentPath}`);
+import ko from 'knockout';
+
+const componentPathsByName = {};
+
+async function importComponents(componentPaths) {
+    for (const componentPath of componentPaths) {
+        let componentLoaded = false;
+
+        for (const archesApp of ARCHES_APPLICATIONS) {
+            try {
+                await import(`${SITE_PACKAGES_DIRECTORY}/${archesApp}/media/js/${componentPath}`);
+                componentLoaded = true;
+                break;
             }
-            catch(e) {  // if project path fails, load arches-core path
-                try { 
-                    // eslint-disable-next-line no-undef
-                    require(`${ARCHES_CORE_DIRECTORY}/app/media/js/${componentPath}`);
+            catch (e) {
+                try {
+                    await import(`${LINKED_APPLICATION_PATH_0}/media/js/${componentPath}`);
+                    componentLoaded = true;
+                    break;
                 }
-                catch(e) {  // if arches-core path fails, look in each arches application for path
-                    // eslint-disable-next-line no-undef
-                    for (const archesApp of ARCHES_APPLICATIONS) {
-                        // eslint-disable-next-line no-undef
+                catch {
+                    try {
+                        await import(`${LINKED_APPLICATION_PATH_1}/media/js/${componentPath}`);
+                        componentLoaded = true;
+                        break;
+                    }
+                    catch {
                         try {
-                            require(`${SITE_PACKAGES_DIRECTORY}/${archesApp}/media/js/${componentPath}`);
+                            await import(`${LINKED_APPLICATION_PATH_2}/media/js/${componentPath}`);
+                            componentLoaded = true;
                             break;
                         }
-                        catch(e) { // handles egg/wheel links, cannot access them programatically hence manual access
+                        catch {
                             try {
-                                require(`${LINKED_APPLICATION_PATH_0}/media/js/${componentPath}`);
+                                await import(`${LINKED_APPLICATION_PATH_3}/media/js/${componentPath}`);
+                                componentLoaded = true;
                                 break;
                             }
-                            catch {  // handles egg/wheel links, cannot access them programatically hence manual access
+                            catch {
                                 try {
-                                    require(`${LINKED_APPLICATION_PATH_1}/media/js/${componentPath}`);
+                                    await import(`${LINKED_APPLICATION_PATH_4}/media/js/${componentPath}`);
+                                    componentLoaded = true;
                                     break;
                                 }
-                                catch { // handles egg/wheel links, cannot access them programatically hence manual access
+                                catch {
                                     try {
-                                        require(`${LINKED_APPLICATION_PATH_2}/media/js/${componentPath}`);
+                                        await import(`${LINKED_APPLICATION_PATH_5}/media/js/${componentPath}`);
+                                        componentLoaded = true;
                                         break;
                                     }
-                                    catch {}
+                                    catch {
+                                        try {
+                                            await import(`${LINKED_APPLICATION_PATH_6}/media/js/${componentPath}`);
+                                            componentLoaded = true;
+                                            break;
+                                        }
+                                        catch {
+                                            try {
+                                                await import(`${LINKED_APPLICATION_PATH_7}/media/js/${componentPath}`);
+                                                componentLoaded = true;
+                                                break;
+                                            }
+                                            catch {
+                                                try {
+                                                    await import(`${LINKED_APPLICATION_PATH_8}/media/js/${componentPath}`);
+                                                    componentLoaded = true;
+                                                    break;
+                                                }
+                                                catch {
+                                                    // Component not found in linked paths, continue to next archesApp
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -41,5 +79,42 @@ define([], function() {
                 }
             }
         }
-    };
+
+        if (!componentLoaded) { // Finally, look in Arches core for the component
+            try {
+                await import(`${ARCHES_CORE_DIRECTORY}/app/media/js/${componentPath}`);
+            }
+            catch (error) {
+                if (error.code === 'MODULE_NOT_FOUND') {
+                    console.error(`Component "${componentPath}" not found in any application or in Arches core.`);
+                } else {
+                    console.error(`Component ${componentPath} failed to load.`, error);
+                }
+            }
+        }
+    }
+}
+
+export function loadComponentDependencies(componentPaths) {
+    return Promise.all(componentPaths.map(componentPath => importComponents([componentPath])));
+}
+
+export function registerComponentPaths(components, nameKey, pathKey) {
+    for (const component of Object.values(components)) {
+        componentPathsByName[component[nameKey]] = component[pathKey];
+    }
+}
+
+ko.components.loaders.push({
+    getConfig: function(name, callback) {
+        const declaredPath = componentPathsByName[name];
+        if (!declaredPath) {
+            callback(null);
+            return;
+        }
+
+        loadComponentDependencies([declaredPath]).then(() => {
+            ko.components.defaultLoader.getConfig(name, callback);
+        });
+    }
 });

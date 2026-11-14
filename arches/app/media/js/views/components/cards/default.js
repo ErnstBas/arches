@@ -1,10 +1,9 @@
-define([
-    'knockout',
-    'viewmodels/card-component',
-    'templates/views/components/cards/default.htm',
-], function(ko, CardComponentViewModel, defaultCardTemplate) {
-    return ko.components.register('default-card', {
-        viewModel: CardComponentViewModel,
-        template: defaultCardTemplate,
-    });
+import ko from 'knockout';
+import CardComponentViewModel from 'viewmodels/card-component';
+import defaultCardTemplate from 'templates/views/components/cards/default.htm';
+import 'bindings/sortable';
+
+export default ko.components.register('default-card', {
+    viewModel: CardComponentViewModel,
+    template: defaultCardTemplate,
 });

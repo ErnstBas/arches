@@ -1,5 +1,5 @@
 from __future__ import absolute_import
-from arches.setup import get_version
+import importlib.metadata
 
 try:
     # This will make sure the app is always imported when
@@ -10,6 +10,11 @@ try:
 except Exception as e:
     pass
 
-VERSION = (7, 6, 0, "alpha", 0)  # VERSION[3] options = "alpha", "beta", "rc", or "final"
+__version__ = importlib.metadata.version(__package__)
 
-__version__ = get_version(VERSION)
+# Keep pre-8.2 module paths for the applications now under arches.extensions
+# resolvable. Installed here rather than in AppConfig.ready() because project
+# settings reference those paths before the app registry is populated.
+from arches.extensions import compat as _extensions_compat
+
+_extensions_compat.install()

@@ -50,6 +50,7 @@
                 "user_id": null
             },
             "iconclass": "",
+            "is_active": true,
             "is_editable": true,
             "isresource": true,
             "jsonldcontext": null,
@@ -83,13 +84,15 @@
                     "config": {
                         "graphs": [{
                             "graphid": "2c03ddcc-bfa8-11e9-b4dc-0242ac160002",
-                            "ontologyProperty": "",
-                            "inverseOntologyProperty": ""
+                            "relationshipSource": "ontology",
+                            "relationship": "",
+                            "inverseRelationship": ""
                         },
                         {
                             "graphid": "0c6269e8-bfa8-11e9-bd39-0242ac160002",
-                            "ontologyProperty": "",
-                            "inverseOntologyProperty": ""
+                            "relationshipSource": "ontology",
+                            "relationship": "",
+                            "inverseRelationship": ""
                         }]
                     },
                     "datatype": "resource-instance",
@@ -125,7 +128,7 @@
                 "ontologyclass": "http://www.cidoc-crm.org/cidoc-crm/E22_Man-Made_Object",
                 "sortorder": 0
             },
-            "slug": null,
+            "slug": "4564_referenced_class_not_used",
             "subtitle": "",
             "template_id": "50000000-0000-0000-0000-000000000001",
             "version": ""

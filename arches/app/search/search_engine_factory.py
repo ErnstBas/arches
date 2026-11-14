@@ -29,11 +29,19 @@ class SearchEngineFactory(object):
         prefix=settings.ELASTICSEARCH_PREFIX,
         connection_options=settings.ELASTICSEARCH_CONNECTION_OPTIONS,
     ):
+        if not settings.ELASTICSEARCH_ENABLED:
+            # imported lazily so that the elasticsearch package is never loaded
+            from arches.app.search.null_search_engine import NullSearchEngine
+
+            return NullSearchEngine(prefix=prefix)
+
         backend = settings.SEARCH_BACKEND
         components = backend.split(".")
         classname = components[len(components) - 1]
         modulename = (".").join(components[0 : len(components) - 1])
-        _temp = __import__(modulename, globals(), locals(), [classname])  # in py3, level must be >= 0
+        _temp = __import__(
+            modulename, globals(), locals(), [classname]
+        )  # in py3, level must be >= 0
         args = {}
         args["prefix"] = prefix
         if "cloud_id" not in settings.ELASTICSEARCH_CONNECTION_OPTIONS:
